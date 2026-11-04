@@ -13,38 +13,28 @@ namespace Vincil.VUSharp.Audio
     [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
     public class VUSharpAudioManager : AudioManager
     {
-        [SerializeField] private int maxAudioSources = 16; // Total number of audio sources to use
-        [SerializeField] private AudioPlayer[] audioPlayers;
-        [SerializeField] private AudioPlayer[] audioPlayersLongRange;
-        [SerializeField] private AudioPlayer[] audioPlayers2d;
-        //[SerializeField] private AudioSource _audioSourceMusic;
+        [SerializeField] private int maxAudioSources = 24; // Total number of audio sources to use
+        [SerializeField] GameObject audioPlayerObjectToUse;
+        //[SerializeField] GameObject audioSourceNormal3dGOPrefab;
+        //[SerializeField] GameObject audioSourceLongRange3dGOPrefab;
+        //[SerializeField] GameObject audioSource2dGOPrefab;
 
-        //private bool[] _isActiveArray;
-        //private bool[] _isActiveLongRangeArray;
-        //private int _audioSources2dIndex = 0;
+        private AudioPlayer[] audioPlayers;
+        private int[] audioPlayersUsagePriority;
+        private int[] audioPlayersStopId;
 
-        private DataDictionary audioPlayersInUse = new DataDictionary();
-        private const string TOTAL_AUDIO_PLAYERS_IN_USE_KEY = "InUse";
+        private int afterLastUsedAudioIndex;
 
-        private DataDictionary audioPlayersUnused = new DataDictionary();
+        //private DataDictionary audioPlayersInUse = new DataDictionary();
+        //private const string TOTAL_AUDIO_PLAYERS_IN_USE_KEY = "InUse";
 
-        private DataDictionary stoppableAudioPlayers = new DataDictionary();
+        //private DataDictionary audioPlayersUnused = new DataDictionary();
 
-        //private DataList _activelyPlayingAudioSourceIndexes = new DataList();
-        //private DataList _activelyPlayingAudioSourceIsLongRange = new DataList();
-        //private DataList _activelyPlayingAudioSourcePriorities = new DataList();
-        //private int _numberOfActive3dAudioSources = 0;
+        //private DataDictionary stoppableAudioPlayers = new DataDictionary();
 
-        //private DataList _audioSourcesNeedingToBePlayed = new DataList();
-        //private bool _hasQueuedPlayingAudioSources = false;
+        DataDictionary cachedAudioData = new DataDictionary();
 
-        //private bool _isWatchingForEndingClips = false;
-
-        //private int[] _maxAudioSourcesPerPriority = new int[(int)AudioClipPriority.Count];
-
-        //private int[] _audioSourcesPlayingPerPriority = new int[(int)AudioClipPriority.Count];
-
-        //private bool[] _audioSources2dLooping;
+        
 
         private int stoppableUIDCounter = 0;
 
@@ -62,127 +52,107 @@ namespace Vincil.VUSharp.Audio
         }
         private void Init()
         {
-            audioPlayersInUse.Add(TOTAL_AUDIO_PLAYERS_IN_USE_KEY, 0);
-            audioPlayersInUse.Add(AudioPriorityTag.Low(), new DataList());
-            audioPlayersInUse.Add(AudioPriorityTag.Medium(), new DataList());
-            audioPlayersInUse.Add(AudioPriorityTag.High(), new DataList());
-            audioPlayersInUse.Add(AudioPriorityTag.Max(), new DataList());
+            if (audioPlayerObjectToUse == null)
+            {
+                Debug.LogError($"{nameof(audioPlayerObjectToUse)} not set", this);
+                return;
+            }
+            audioPlayerObjectToUse.transform.parent = null;
 
-            DataList audioPlayersList = new DataList();
+            audioPlayers = new AudioPlayer[maxAudioSources];
+
             for (int i = 0; i < audioPlayers.Length; i++)
             {
-                audioPlayersList.Add(new DataToken(audioPlayers[i]));
-                audioPlayers[i].TypeTag = AudioPlayerTypeTags.Standard3D();
+                GameObject go = i == 0 ? audioPlayerObjectToUse : Instantiate(audioPlayerObjectToUse);
+                AudioPlayer player = go.GetComponent<AudioPlayer>();
+                if (player != null)
+                {
+                    player.Setup(this, i);
+                    audioPlayers[i] = player;
+                }
+                else
+                {
+                    Debug.LogError($"AudioPlayer missing from {go.name}", this);
+                }
             }
-            audioPlayersUnused.Add(AudioPlayerTypeTags.Standard3D(), audioPlayersList.ShallowClone());
 
-            audioPlayersList = new DataList();
-            for (int i = 0; i < audioPlayersLongRange.Length; i++)
+            audioPlayersUsagePriority = new int[maxAudioSources];
+            audioPlayersStopId = new int[maxAudioSources];
+            for (int i = 0; i < maxAudioSources; i++)
             {
-                audioPlayersList.Add(new DataToken(audioPlayersLongRange[i]));
-                audioPlayersLongRange[i].TypeTag = AudioPlayerTypeTags.LongRange3D();
+                audioPlayersUsagePriority[i] = -1;
             }
-            audioPlayersUnused.Add(AudioPlayerTypeTags.LongRange3D(), audioPlayersList.ShallowClone());
-
-            audioPlayersList = new DataList();
-            for (int i = 0; i < audioPlayers2d.Length; i++)
+            for (int i = 0; i < maxAudioSources; i++)
             {
-                audioPlayersList.Add(new DataToken(audioPlayers2d[i]));
-                audioPlayers2d[i].TypeTag = AudioPlayerTypeTags.Audio2D();
+                audioPlayersStopId[i] = -1;
             }
-            audioPlayersUnused.Add(AudioPlayerTypeTags.Audio2D(), audioPlayersList.ShallowClone());
+            //audioPlayersInUse.Add(TOTAL_AUDIO_PLAYERS_IN_USE_KEY, 0);
+            //audioPlayersInUse.Add(AudioPriorityTag.Low(), new DataList());
+            //audioPlayersInUse.Add(AudioPriorityTag.Medium(), new DataList());
+            //audioPlayersInUse.Add(AudioPriorityTag.High(), new DataList());
+            //audioPlayersInUse.Add(AudioPriorityTag.Max(), new DataList());
 
-
-
-            ////_isActiveArray = new bool[audioPlayers.Length];
-            ////_isActiveLongRangeArray = new bool[audioPlayersLongRange.Length];
-
-            //_audioSources2dLooping = new bool[audioPlayers2d.Length];
-            ////_activelyPlayingAudioSourcePriorities = new AudioClipPriority[_max3dAudioSources];
-            ////_activelyPlayingAudioSourceIsLongRange = new bool[_max3dAudioSources];
-
-            //_maxAudioSourcesPerPriority[(int)AudioClipPriority.High] = (int)(maxAudioSources * 0.4);
-            //_maxAudioSourcesPerPriority[(int)AudioClipPriority.Medium] = (int)(maxAudioSources * 0.3);
-            //_maxAudioSourcesPerPriority[(int)AudioClipPriority.Low] = (int)(maxAudioSources * 0.2);
+            //SetupAudioPlayers(audioSourceNormal3dGOPrefab, AudioPlayerTypeTags.Standard3D());
+            //SetupAudioPlayers(audioSourceLongRange3dGOPrefab, AudioPlayerTypeTags.LongRange3D());
+            //SetupAudioPlayers(audioSource2dGOPrefab, AudioPlayerTypeTags.Audio2D());
         }
 
-        
-
-        public override int PlayStoppableAudio(AudioData data, Transform transformToConstrainTo, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D", bool shouldLoop = false)
+        public override int PlayFeedbackAudio(GameObject dataPrefabGameObject, bool isLooping = false)
         {
-            
-            AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
-            if (audioPlayer == null) return -1;
-
-            int uid = RegisterStoppableAudioPlayer(audioPlayer);
-            audioPlayer.Play(data, transformToConstrainTo, shouldLoop);
-            return uid;
+            return PlayAudio(dataPrefabGameObject, Vector3.zero, AudioPriority.Max, isLooping);
         }
 
-        public override int PlayStoppableAudio(AudioData data, Vector3 position, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D", bool shouldLoop = false)
+        public override int PlayAudio(GameObject dataPrefabGameObject, Transform transformToConstrainTo, AudioPriority priority, bool isLooping = false)
         {
-            AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
-            if (audioPlayer == null)
+            int stopId;
+            AudioPlayer audioPlayer = GetNextFreeAudioPlayer(priority, out stopId);
+            AudioData data = GetOrCreateAudioDataInstance(dataPrefabGameObject);
+            audioPlayer.Play(data, transformToConstrainTo, isLooping);
+            return stopId;
+        }
+
+        public override int PlayAudio(GameObject dataPrefabGameObject, Vector3 position, AudioPriority priority, bool isLooping = false)
+        {
+            int stopId;
+            AudioPlayer audioPlayer = GetNextFreeAudioPlayer(priority, out stopId);
+            AudioData data = GetOrCreateAudioDataInstance(dataPrefabGameObject);
+            audioPlayer.Play(data, position, isLooping);
+            return stopId;
+        }
+
+        public override int PlayAudioWithVolumeAndPitch(GameObject dataPrefabGameObject, Vector3 position, AudioPriority priority, float volumeScale, float pitchScale, bool isLooping = false)
+        {
+            int stopId;
+            AudioPlayer audioPlayer = GetNextFreeAudioPlayer(priority, out stopId);
+            AudioData data = GetOrCreateAudioDataInstance(dataPrefabGameObject);
+            audioPlayer.PlayWithVolumeAndPitch(data, position, isLooping, volumeScale, pitchScale);
+            return stopId;
+        }
+
+        public override int PlayAudioWithOverrides(GameObject dataPrefabGameObject, Transform transformToConstrainTo, AudioPriority priority, bool isLooping, bool is3d, float near = 0, float far = 0, float volumetricRadius = 0)
+        {
+            int stopId;
+            AudioPlayer audioPlayer = GetNextFreeAudioPlayer(priority, out stopId);
+            AudioData data = GetOrCreateAudioDataInstance(dataPrefabGameObject);
+            audioPlayer.PlayWithOverrides(data, transformToConstrainTo, isLooping, is3d, near, far, volumetricRadius);
+            return stopId;
+        }
+
+        public override int PlayAudioWithOverrides(GameObject dataPrefabGameObject, Vector3 position, AudioPriority priority, bool isLooping, bool is3d, float near = 0, float far = 0, float volumetricRadius = 0)
+        {
+            int stopId;
+            AudioPlayer audioPlayer = GetNextFreeAudioPlayer(priority, out stopId);
+            AudioData data = GetOrCreateAudioDataInstance(dataPrefabGameObject);
+            audioPlayer.PlayWithOverrides(data, position, isLooping, is3d, near, far, volumetricRadius);
+            return stopId;
+        }
+
+        public override bool StopAudio(int stopId)
+        {
+            int index = Array.IndexOf(audioPlayersStopId, stopId);
+            if (index == -1)
             {
-                Debug.LogWarning("No available audio players to play stoppable audio");
-                return -1;
-            }
-            int uid = RegisterStoppableAudioPlayer(audioPlayer);
-            audioPlayer.Play(data, position, shouldLoop);
-            return uid;
-        }
-
-        public override int PlayStoppableAudioIn2d(AudioData data, string audioPriorityTag = "Medium", bool shouldLoop = false)
-        {
-            AudioPlayer audioPlayer = GetAvailableAudioPlayer(AudioPlayerTypeTags.Audio2D(), audioPriorityTag);
-            if (audioPlayer == null)
-            {
-                Debug.LogWarning("No available audio players to play stoppable audio");
-                return -1;
-            }
-            int uid = RegisterStoppableAudioPlayer(audioPlayer);
-            audioPlayer.Play(data, Vector3.zero, shouldLoop);
-            return uid;
-        }
-        
-        private int RegisterStoppableAudioPlayer(AudioPlayer audioPlayer)
-        {
-            int uid = stoppableUIDCounter++;
-            audioPlayer.StoppableUID = uid;
-            stoppableAudioPlayers.Add(uid, new DataToken(audioPlayer));
-            return uid;
-        }
-
-        public override bool PlayOneShotAudio(AudioData data, Transform transformToConstrainTo, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D")
-        {
-            AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
-            if (audioPlayer == null) return false;
-            audioPlayer.Play(data, transformToConstrainTo);
-            return true;
-        }
-
-        public override bool PlayOneShotAudio(AudioData data, Vector3 position, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D")
-        {
-            AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
-            if (audioPlayer == null) return false;
-            audioPlayer.Play(data, position);
-            return true;
-        }
-
-        public override bool PlayOneShotAudioIn2d(AudioData data, string audioPriorityTag = "Medium")
-        {
-            AudioPlayer audioPlayer = GetAvailableAudioPlayer(AudioPlayerTypeTags.Audio2D(), audioPriorityTag);
-            if (audioPlayer == null) return false;
-            audioPlayer.Play(data, Vector3.zero);
-            return true;
-        }
-
-        public override bool StopAudio(int playId)
-        {
-            if (stoppableAudioPlayers.TryGetValue(playId, TokenType.Reference, out DataToken audioPlayerToken))
-            {
-                AudioPlayer audioPlayer = (AudioPlayer)audioPlayerToken.Reference;
-                audioPlayer.Stop();
+                audioPlayers[index].ForceStop();
                 return true;
             }
             return false;
@@ -190,103 +160,315 @@ namespace Vincil.VUSharp.Audio
 
         public override void StopAllAudio()
         {
-            DataList audioPlayersToStop;
-            DataList keys = audioPlayersInUse.GetKeys();
-            for(int i = 0; i < keys.Count; i++)
+            for (int i = 0; i < audioPlayers.Length; i++)
             {
-                string key = keys[i].String;
-                if(key == TOTAL_AUDIO_PLAYERS_IN_USE_KEY)
+                if (audioPlayersUsagePriority[i] == -1)
                 {
-                    continue;
-                }
-                audioPlayersToStop = audioPlayersInUse[key].DataList;
-                while(audioPlayersToStop.Count > 0)
-                {
-                    AudioPlayer audioPlayer = (AudioPlayer)audioPlayersToStop[0].Reference;
-                    audioPlayer.Stop();
+                    audioPlayers[i].ForceStop();
                 }
             }
         }
 
-        internal void ReportAudioPlayerStoppedPlaying(AudioPlayer audioPlayer)
+        internal void ReportAudioPlayerStoppedPlaying(int audioPlayerId)
         {
-            if(audioPlayer.StoppableUID != -1)
+            audioPlayersStopId[audioPlayerId] = -1;
+            audioPlayersUsagePriority[audioPlayerId] = -1;
+            //string s = $"audio player {audioPlayerId} returned to pool; [{audioPlayersUsagePriority[0]}";
+            //for (int i = 1; i < audioPlayersUsagePriority.Length; i++) s += $", {audioPlayersUsagePriority[i]}";
+            //Debug.LogWarning(s + "]");
+        }
+
+        private AudioPlayer GetNextFreeAudioPlayer(AudioPriority priority, out int stopId)
+        {
+            int index = -1;
+            int priorityToOverride = -2;
+            while (index == -1 && priorityToOverride <= (int)priority)
             {
-                stoppableAudioPlayers.Remove(audioPlayer.StoppableUID);
-                audioPlayer.StoppableUID = -1;
+                priorityToOverride++;
+                index = Array.IndexOf(audioPlayersUsagePriority, priorityToOverride, afterLastUsedAudioIndex);
+                if (index == -1) Array.IndexOf(audioPlayersUsagePriority, priorityToOverride);                
             }
-            if (audioPlayersInUse[audioPlayer.PriorityTag].DataList.Remove(new DataToken(audioPlayer)))
+
+            if(index == -1)
             {
-                audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY] = audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY].Int - 1;
-                audioPlayersUnused[audioPlayer.TypeTag].DataList.Add(new DataToken(audioPlayer));
+                Debug.LogError("Couldn't find any valid audio players to use!  Using fallback!", this);
+                index = (afterLastUsedAudioIndex + 1) % audioPlayers.Length; 
+            }
+
+            if (priorityToOverride > -1)
+            {
+                Debug.Log("All audio players in use.  Overwriting playing audio", this);
+                audioPlayers[index].ForceStop();
+            }
+            
+            if (priorityToOverride == (int)AudioPriority.Max) Debug.LogWarning("Overwriting max priority audio source!", this);
+
+            afterLastUsedAudioIndex = (index + 1) % audioPlayers.Length;
+
+            stopId = stoppableUIDCounter++;
+            audioPlayersStopId[index] = stopId;
+            audioPlayersUsagePriority[index] =  (int)priority;
+
+            return audioPlayers[index];
+        }
+
+        private AudioData GetOrCreateAudioDataInstance(GameObject audioDataPrefab)
+        {
+            //Debug.LogError($"audioDataPrefab is null {audioDataPrefab == null}");
+            //Debug.LogError($"audioDataPrefab name {audioDataPrefab.name}");
+            if (cachedAudioData.TryGetValue(audioDataPrefab.name, TokenType.Reference, out DataToken token))
+            {
+                //Debug.LogError($"audioDataPrefab found");
+                //Debug.LogError($"(AudioData)token.Reference is null {(AudioData)token.Reference == null}");
+                return (AudioData)token.Reference;
             }
             else
             {
-                Debug.LogWarning($"[AudioManager] Audio player reported stopped playing but was not found in in-use list: {audioPlayer.PriorityTag}");
-            }           
+                //Debug.LogError($"audioDataPrefab ceated");
+                GameObject audioDataGO = Instantiate(audioDataPrefab, transform);
+                //Debug.LogError($"audioDataGO is null {audioDataGO == null}");
+                AudioData audioData = audioDataGO.GetComponent<AudioData>();
+                //Debug.LogError($"audioData is null {audioData == null}");
+                cachedAudioData.SetValue(audioDataPrefab.name, new DataToken(audioData));
+                return audioData;
+            }
         }
 
-        private AudioPlayer GetAvailableAudioPlayer(string audioPlayerTypeTag, string audioPriorityTag)
-        {
-            if (!audioPlayersUnused.ContainsKey(audioPlayerTypeTag))
-            {
-                Debug.LogError($"Audio player type tag {audioPlayerTypeTag} is invalid!");
-                return null;
-            }
-            if(!audioPlayersInUse.ContainsKey(audioPriorityTag))
-            {
-                Debug.LogError($"Audio player type tag {audioPriorityTag} is invalid!");
-                return null;
-            }
+        #region old code
 
-            AudioPlayer audioPlayer = null;
-            if (audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY].Int < maxAudioSources)
-            {
-                audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
-            }
-            else if (audioPriorityTag != AudioPriorityTag.Low())
-            {
-                if(audioPlayersInUse[AudioPriorityTag.Low()].DataList.Count > 0)
-                {
-                    AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.Low()].DataList[0].Reference;
-                    audioPlayerToStop.Stop();
-                    audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
-                }
-                else if(audioPriorityTag != AudioPriorityTag.Medium())
-                {
-                    if (audioPlayersInUse[AudioPriorityTag.Medium()].DataList.Count > 0)
-                    {
-                        AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.Medium()].DataList[0].Reference;
-                        audioPlayerToStop.Stop();
-                        audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
-                    }
-                    else if (audioPriorityTag != AudioPriorityTag.High())
-                    {
-                        if (audioPlayersInUse[AudioPriorityTag.High()].DataList.Count > 0)
-                        {
-                            AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.High()].DataList[0].Reference;
-                            audioPlayerToStop.Stop();
-                            audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
-                        }
-                        else
-                        {
-                            AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.Max()].DataList[0].Reference;
-                            audioPlayerToStop.Stop();
-                            audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
-                        }                        
-                    }
-                }
-            }
+        //private void SetupAudioPlayers(GameObject audioPlayerPrefabGO, string typeTag)
+        //{
+        //    DataList audioPlayersList = new DataList();
+        //    for (int i = 0; i < maxAudioSources; i++)
+        //    {
+        //        GameObject audioPlayerGO = Instantiate(audioPlayerPrefabGO, transform);
+        //        audioPlayerGO.name = $"{audioPlayerPrefabGO.name}_{i}";
+        //        AudioPlayer audioPlayer = audioPlayerGO.GetComponent<AudioPlayer>();
+        //        audioPlayer.Setup(this, typeTag);
+        //        audioPlayersList.Add(audioPlayer);
+        //    }
 
-            if (audioPlayer != null)
-            {
-                audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY] = audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY].Int + 1;
-                audioPlayersInUse[audioPriorityTag].DataList.Add(new DataToken(audioPlayer));
-                audioPlayer.PriorityTag = audioPriorityTag;
-            }
+        //    audioPlayersUnused.Add(typeTag, audioPlayersList.ShallowClone());
+        //}
 
-            return audioPlayer;
-        }
+        //public override int PlayStoppableAudio(GameObject dataPrefab, Transform transformToConstrainTo, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D", bool shouldLoop = false)
+        //{
+        //    AudioData data = GetOrCreateAudioDataInstance(dataPrefab);
+        //    return PlayStoppableAudio(data, transformToConstrainTo, audioPriorityTag, audioPlayerTypeTag, shouldLoop);
+        //}
+
+        //public override int PlayStoppableAudio(AudioData data, Transform transformToConstrainTo, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D", bool shouldLoop = false)
+        //{            
+        //    AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
+        //    if (audioPlayer == null) return -1;
+
+        //    int uid = RegisterStoppableAudioPlayer(audioPlayer);
+
+        //    audioPlayer.Play(data, transformToConstrainTo, shouldLoop);
+        //    return uid;
+        //}
+
+        //public override int PlayStoppableAudio(GameObject dataPrefab, Vector3 position, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D", bool shouldLoop = false)
+        //{
+        //    AudioData data = GetOrCreateAudioDataInstance(dataPrefab);
+        //    return PlayStoppableAudio(data, position, audioPriorityTag, audioPlayerTypeTag, shouldLoop);
+        //}
+
+        //public override int PlayStoppableAudio(AudioData data, Vector3 position, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D", bool shouldLoop = false)
+        //{
+        //    AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
+        //    if (audioPlayer == null)
+        //    {
+        //        Debug.LogWarning("No available audio players to play stoppable audio");
+        //        return -1;
+        //    }
+        //    int uid = RegisterStoppableAudioPlayer(audioPlayer);
+
+        //    audioPlayer.Play(data, position, shouldLoop);
+        //    return uid;
+        //}
+
+        //public override int PlayStoppableAudioIn2d(GameObject dataPrefab, string audioPriorityTag = "Medium", bool shouldLoop = false)
+        //{
+        //    AudioData data = GetOrCreateAudioDataInstance(dataPrefab);
+        //    return PlayStoppableAudioIn2d(data, audioPriorityTag, shouldLoop);
+        //}
+
+        //public override int PlayStoppableAudioIn2d(AudioData data, string audioPriorityTag = "Medium", bool shouldLoop = false)
+        //{
+        //    AudioPlayer audioPlayer = GetAvailableAudioPlayer(AudioPlayerTypeTags.Audio2D(), audioPriorityTag);
+        //    if (audioPlayer == null)
+        //    {
+        //        Debug.LogWarning("No available audio players to play stoppable audio");
+        //        return -1;
+        //    }
+        //    int uid = RegisterStoppableAudioPlayer(audioPlayer);
+
+        //    audioPlayer.Play(data, Vector3.zero, shouldLoop);
+        //    return uid;
+        //}
+
+        //private int RegisterStoppableAudioPlayer(AudioPlayer audioPlayer)
+        //{
+        //    int uid = stoppableUIDCounter++;
+        //    audioPlayer.stoppableUID = uid;
+        //    stoppableAudioPlayers.Add(uid, new DataToken(audioPlayer));
+        //    return uid;
+        //}
+
+        //public override bool PlayOneShotAudio(GameObject dataPrefab, Transform transformToConstrainTo, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D")
+        //{
+        //    AudioData data = GetOrCreateAudioDataInstance(dataPrefab);
+        //    return PlayOneShotAudio(data, transformToConstrainTo, audioPriorityTag, audioPlayerTypeTag);
+        //}
+
+        //public override bool PlayOneShotAudio(AudioData data, Transform transformToConstrainTo, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D")
+        //{
+        //    AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
+        //    if (audioPlayer == null) return false;
+
+        //    audioPlayer.Play(data, transformToConstrainTo);
+        //    return true;
+        //}
+
+        //public override bool PlayOneShotAudio(GameObject dataPrefab, Vector3 position, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D")
+        //{
+        //    AudioData data = GetOrCreateAudioDataInstance(dataPrefab);
+        //    return PlayOneShotAudio(data, position, audioPriorityTag, audioPlayerTypeTag);
+        //}
+
+        //public override bool PlayOneShotAudio(AudioData data, Vector3 position, string audioPriorityTag = "Medium", string audioPlayerTypeTag = "Standard3D")
+        //{
+        //    AudioPlayer audioPlayer = GetAvailableAudioPlayer(audioPlayerTypeTag, audioPriorityTag);
+        //    if (audioPlayer == null) return false;
+
+        //    audioPlayer.Play(data, position);
+        //    return true;
+        //}
+
+        //public override bool PlayOneShotAudioIn2d(GameObject dataPrefab, string audioPriorityTag = "Medium")
+        //{
+        //    AudioData data = GetOrCreateAudioDataInstance(dataPrefab);
+        //    return PlayOneShotAudioIn2d(data, audioPriorityTag);
+        //}
+
+        //public override bool PlayOneShotAudioIn2d(AudioData data, string audioPriorityTag = "Medium")
+        //{
+        //    AudioPlayer audioPlayer = GetAvailableAudioPlayer(AudioPlayerTypeTags.Audio2D(), audioPriorityTag);
+        //    if (audioPlayer == null) return false;
+
+        //    audioPlayer.Play(data, Vector3.zero);
+        //    return true;
+        //}
+
+
+
+        //public override void StopAllAudio()
+        //{
+        //    DataList audioPlayersToStop;
+        //    DataList keys = audioPlayersInUse.GetKeys();
+        //    for (int i = 0; i < keys.Count; i++)
+        //    {
+        //        string key = keys[i].String;
+        //        if (key == TOTAL_AUDIO_PLAYERS_IN_USE_KEY)
+        //        {
+        //            continue;
+        //        }
+        //        audioPlayersToStop = audioPlayersInUse[key].DataList;
+        //        while (audioPlayersToStop.Count > 0)
+        //        {
+        //            AudioPlayer audioPlayer = (AudioPlayer)audioPlayersToStop[0].Reference;
+        //            audioPlayer.ForceStop();
+        //        }
+        //    }
+        //}
+
+
+
+        //internal void ReportAudioPlayerStoppedPlaying(AudioPlayer audioPlayer)
+        //{
+        //    if(audioPlayer.stoppableUID != -1)
+        //    {
+        //        stoppableAudioPlayers.Remove(audioPlayer.stoppableUID);
+        //        audioPlayer.stoppableUID = -1;
+        //    }
+        //    //Debug.LogWarning($"[{audioPlayer.gameObject.name} {audioPlayer.gameObject.GetInstanceID()}] audioPlayer.PriorityTag: {audioPlayer.priorityTag}");
+        //    if (audioPlayersInUse[audioPlayer.priorityTag].DataList.Remove(new DataToken(audioPlayer)))
+        //    {
+        //        audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY] = audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY].Int - 1;
+        //        audioPlayersUnused[audioPlayer.typeTag].DataList.Add(new DataToken(audioPlayer));
+        //    }
+        //    else
+        //    {
+        //        Debug.LogWarning($"[AudioManager] Audio player reported stopped playing but was not found in in-use list: {audioPlayer.priorityTag}");
+        //    }           
+        //}
+
+        //private AudioPlayer GetAvailableAudioPlayer(string audioPlayerTypeTag, string audioPriorityTag)
+        //{
+        //    if (!audioPlayersUnused.ContainsKey(audioPlayerTypeTag))
+        //    {
+        //        Debug.LogError($"Audio player type tag {audioPlayerTypeTag} is invalid!");
+        //        return null;
+        //    }
+        //    if(!audioPlayersInUse.ContainsKey(audioPriorityTag))
+        //    {
+        //        Debug.LogError($"Audio player type tag {audioPriorityTag} is invalid!");
+        //        return null;
+        //    }
+
+        //    AudioPlayer audioPlayer = null;
+        //    if (audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY].Int < maxAudioSources)
+        //    {
+        //        audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
+        //    }
+        //    else if (audioPriorityTag != AudioPriorityTag.Low())
+        //    {
+        //        if(audioPlayersInUse[AudioPriorityTag.Low()].DataList.Count > 0)
+        //        {
+        //            AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.Low()].DataList[0].Reference;
+        //            audioPlayerToStop.ForceStop();
+        //            audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
+        //        }
+        //        else if(audioPriorityTag != AudioPriorityTag.Medium())
+        //        {
+        //            if (audioPlayersInUse[AudioPriorityTag.Medium()].DataList.Count > 0)
+        //            {
+        //                AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.Medium()].DataList[0].Reference;
+        //                audioPlayerToStop.ForceStop();
+        //                audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
+        //            }
+        //            else if (audioPriorityTag != AudioPriorityTag.High())
+        //            {
+        //                if (audioPlayersInUse[AudioPriorityTag.High()].DataList.Count > 0)
+        //                {
+        //                    AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.High()].DataList[0].Reference;
+        //                    audioPlayerToStop.ForceStop();
+        //                    audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
+        //                }
+        //                else
+        //                {
+        //                    AudioPlayer audioPlayerToStop = (AudioPlayer)audioPlayersInUse[AudioPriorityTag.Max()].DataList[0].Reference;
+        //                    audioPlayerToStop.ForceStop();
+        //                    audioPlayer = (AudioPlayer)audioPlayersUnused[audioPlayerTypeTag].DataList.PullOutLastElement().Reference;
+        //                }                        
+        //            }
+        //        }
+        //    }
+
+        //    if (audioPlayer != null)
+        //    {
+        //        audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY] = audioPlayersInUse[TOTAL_AUDIO_PLAYERS_IN_USE_KEY].Int + 1;
+        //        audioPlayersInUse[audioPriorityTag].DataList.Add(new DataToken(audioPlayer));
+        //        //Debug.LogWarning($"[{audioPlayer.gameObject.name} {audioPlayer.gameObject.GetInstanceID()}] Assigning audio player priority tag: {audioPriorityTag}");
+        //        audioPlayer.priorityTag = audioPriorityTag;
+        //        //Debug.LogWarning($"[{audioPlayer.gameObject.name} {audioPlayer.gameObject.GetInstanceID()}] audioPlayer.PriorityTag: {audioPlayer.priorityTag}");
+        //    }
+
+        //    return audioPlayer;
+        //}
+
+
 
 
         //actual looping is not advised until I can make sure the loop ends in edge cases, like during a player dc
@@ -663,5 +845,6 @@ namespace Vincil.VUSharp.Audio
         ////{
         ////    _audioSourceMusic.Stop();
         ////}
+        #endregion
     }
 }
